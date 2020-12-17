@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -13,51 +14,68 @@ type PortScan struct{
 	cores         int
 	threads       int
 	addr          string
-	availablePort []int
+	availablePort []string
 	wasteTime int64
 	rwLocker sync.RWMutex
+	ipBegin string
+	ipEnd string
+	ipTable []string
 }
 
 func(ps *PortScan) scan() error {
-	start:=time.Now().Unix()
+
 	err:= ps.parse()
 	if err != nil{
 		return err
 	}
 	fmt.Println("开始扫描...")
+	if len(ps.ipTable)==0{
+	start:=time.Now().Unix()
 	channel:=make(chan int,ps.threads)
-	ports:=65535
-	for port:=1;port<ports;port++ {
+	for port:=1;port<65535;port++ {
 		channel <- 1
-		go ps.check(port, &channel)
+		go ps.check(ps.addr,port, &channel)
 	}
 		end := time.Now().Unix()
 		ps.wasteTime = end - start
 		fmt.Printf("扫描结束,耗时%d秒,%s:%s共扫描%d个可用端口\r\n", ps.wasteTime, ps.protocol, ps.addr, len(ps.availablePort))
 		return nil
+}else{
+		start:=time.Now().Unix()
+		channel:=make(chan int,ps.threads)
+		for _,addr:=range ps.ipTable{
+			for port:=1;port<65535;port++{
+				channel<-1
+				go ps.check(addr,port,&channel)
+			}
+		}
+		end := time.Now().Unix()
+		ps.wasteTime = end - start
+		fmt.Printf("扫描结束,耗时%d秒,%s:%s到%s共扫描%d个可用端口\r\n", ps.wasteTime, ps.protocol, ps.ipBegin,ps.ipEnd, len(ps.availablePort))
+		return nil
+	}
 }
 
-func(ps *PortScan) check(port int,channel *chan int){
+func(ps *PortScan) check(ip string,port int,channel *chan int){
 	//fmt.Println("123")
-
-	ps.connect(port)
+	ps.connect(ip,port)
 	<- *channel
 }
 
-func(ps *PortScan) connect(port int){
-	cn:= make(chan int,1)
+func(ps *PortScan) connect(ip string,port int){
+	cn:= make(chan string,1)
 	go func(){
-		conn,err:=net.Dial("tcp",fmt.Sprintf("%s:%d",ps.addr,port))
+		conn,err:=net.Dial("tcp",fmt.Sprintf("%s:%d",ip,port))
 		if err == nil{
 			conn.Close()
-			cn<-port
+			cn<-ip+":"+strconv.Itoa(port)
 		}else{
-			cn<-0
+			cn<-"0"
 		}
 	}()
 	select {
 	case result:=<-cn:
-		if result>0{
+		if result!="0"{
 			ps.appendAvailable(result)
 			ps.out(result)
 		}
